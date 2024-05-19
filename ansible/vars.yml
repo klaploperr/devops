@@ -1,0 +1,7 @@
+DB_HOST: 192.168.0.106
+DB_DATABASE: tg_bot
+DB_USER: postgres
+DB_PASSWORD: q4499
+DB_REPL_USER: replicator
+DB_REPL_PASSWORD: replicator_password
+

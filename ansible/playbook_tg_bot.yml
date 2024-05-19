@@ -1,0 +1,76 @@
+---
+- hosts: all
+  become: true
+  tasks:
+    - name: update apt
+      apt: update_cache=yes cache_valid_time=3600
+
+- hosts: db_image
+  vars_files:
+    - vars.yml
+  become: yes
+  tasks:
+    - name: installing postgresql
+      apt:
+        name: postgresql, postgresql-contrib, python3-psycopg2
+        state: latest
+    - name: copy config to master node
+      copy: src={{ item.src }} dest={{ item.dst }} force=yes
+      with_items:
+        - {src: 'master.conf' ,dst: '/etc/postgresql/15/main/postgresql.conf'}
+    - name: change pg_hba
+      copy: src={{ item.src }} dest={{ item.dst }} force=yes
+      with_items:
+        - {src: 'pg_hba.conf' ,dst: '/etc/postgresql/15/main/pg_hba.conf'}
+    - name: database creating
+      raw: sudo -u postgres psql -c "CREATE DATABASE {{ DB_DATABASE }};"
+      ignore_errors: true
+    - name: user's password changing
+      raw: sudo -u postgres psql -c "ALTER ROLE {{ DB_USER }} PASSWORD '{{ DB_PASSWORD }}';"
+    - name: Create replication user3
+      raw: sudo -u postgres psql -c "CREATE ROLE {{ DB_REPL_USER }} WITH REPLICATION PASSWORD '{{ DB_REPL_PASSWORD }}' LOGIN;"
+      ignore_errors: true
+    - name: master's postgresql restarting
+      command: service postgresql restart
+
+- hosts: db_repl_image
+  vars_files:
+    - vars.yml
+  become: yes
+  tasks:
+    - name: installing postgresql
+      apt:
+        name: postgresql, postgresql-contrib
+        state: latest
+    - name: copy config to master node
+      copy: src={{ item.src }} dest={{ item.dst }} force=yes
+      with_items:
+        - {src: 'slave.conf' ,dst: '/etc/postgresql/15/main/postgresql.conf'}
+    - name: stop postgresql
+      command: systemctl stop postgresql
+    - name: Delete old base and data
+      shell: rm -rf /var/lib/postgresql/15/main/*
+    - name: db replicating
+      raw: su postgres -c "su postgres -c "pg_basebackup -R -h {{DB_HOST}} -U {{DB_REPL_USER}} -D /var/lib/postgresql/15/main -P"
+    - name: start postgresql
+      command: systemctl start postgresql
+
+- hosts: tg_bot
+  tasks:
+    - name: git installation
+      apt:
+        name: git
+        state: latest
+    - name: dependencies installation
+      pip:
+        name: paramiko, psycopg2, python-dotenv, python-telegram-bot==13.7 --break-system-packages
+    - name: cloning repository
+      git:
+        repo: https://github.com/klaploperr/devops.git
+        dest: /home/ansible/devops
+        force: yes
+    - name: copying repo
+      command: cp -u /home/ansible/devops/* /home/ansible/tg_bot/
+      ignore_errors: true
+    - name: bot start
+      command: python3 /home/ansible/tg_bot/main.py
